@@ -1,0 +1,9 @@
+gradio
+pymupdf
+numpy
+Pillow
+chromadb
+transformers
+ollama
+scipy
+shortuuid
