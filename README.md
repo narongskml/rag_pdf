@@ -38,3 +38,7 @@
     > python rag_pdf.py
 
     เปิด browser  ไปที่ http://127.0.0.1:7860
+
+## Screen Shot
+    ![admin panel](image.png)
+    ![chat interface](image-1.png)

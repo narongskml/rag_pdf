@@ -16,15 +16,17 @@ from scipy.spatial.distance import cosine
 import logging
 import re
 
+# CHAT_MODEL ="qwen2.5vl:3b", gemma3:4b,  granite3.2-vision:latest
+# Image folder
 TEMP_IMG="./data/images"
 CHAT_MODEL ="qwen2.5vl:3b"
 
-# CHAT_MODEL ="qwen2.5vl:3b", gemma3:4b,  granite3.2-vision:latest
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize models and 
+# Initialize models for embeding
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
@@ -301,8 +303,6 @@ def chatbot_interface(history: List[Dict]):
     """
     user_message = history[-1]["content"]
     stream, context_texts, image_paths = query_rag(user_message)
-    
-
 
     history.append({"role": "assistant", "content": ""})
     full_answer=""
@@ -319,13 +319,11 @@ def chatbot_interface(history: List[Dict]):
     
     if image_paths:
         history[-1]["content"] += "\n\nรูปภาพที่เกี่ยวข้อง:"
-
-        best_image= find_best_image_for_answer(full_answer)
         yield history
         print("//////////////////////////")
         print(f"full_answer: {full_answer}") 
         print(f"img_paths : {image_paths}") 
-        print(f"best_image : {best_image}") 
+       
         print("//////////////////////////")
         for img_path in image_paths:
             
@@ -367,42 +365,10 @@ def image_cleanup(img_path):
     print(unique_list)
     return unique_list
 
-def find_best_image_for_answer(answer: str) -> tuple:
-    """
-    ค้นหาภาพที่มีความเหมือนสูงสุดกับคำตอบ
-    """
-    answer_embedding = embed_text(answer)
-    
-    logging.info(f"answer: { answer }")
-    # Query only images from Chroma
-    results = collection.query(
-        query_embeddings=[answer_embedding.tolist()],
-        n_results=10,  # Get more results to ensure we have enough images
-        where={"type": "image"}        
-    )
-    print("$$$$$$$$$$$$$$$$$")
-    print(f"result: { results }")
-    image_candidates = []
-    
-    #for metadata in zip(results["metadatas"][0]):
-    #    similarity = 1 - cosine(answer_embedding, np.array())
-    #    image_candidates.append({
-    #        "path": metadata["image_path"],
-    #        "description": metadata["image_description"],
-    #        "markdown": metadata["image_markdown"],
-    #        "similarity": similarity
-    #    })
-    
-    # Select image with highest similarity
-    selected_image = max(image_candidates, key=lambda x: x["similarity"]) if image_candidates else None
-    
-    if selected_image:
-        return [selected_image["path"]], [selected_image["description"]], [selected_image["markdown"]]
-    return [], [], []
 
 # Gradio interface
 with gr.Blocks() as demo:
-    gr.Markdown("# แชทบอท PDF: Multi-Modal RAG (ภาษาไทย)")
+    gr.Markdown("# แชทบอท PDF: RAG")
     
     with gr.Tab("แอดมิน - อัปโหลด PDF"):
         pdf_input = gr.File(label="อัปโหลดไฟล์ PDF")
