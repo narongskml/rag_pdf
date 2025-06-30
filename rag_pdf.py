@@ -16,11 +16,11 @@ from scipy.spatial.distance import cosine
 import logging
 import re
 
-# CHAT_MODEL ="qwen2.5vl:3b", gemma3:4b,  granite3.2-vision:latest
+# CHAT_MODEL ="pdf-deepseek, pdf-qwen,  pdf-llama, pdf-gemma
 # Image folder
 TEMP_IMG="./data/images"
-CHAT_MODEL ="qwen2.5vl:3b"
-
+# รายชื่อ Model ที่คุณมีบน Ollama
+available_models = ["pdf-qwen", "pdf-deepseek", "pdf-llama", "pdf-gemma"]
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -210,7 +210,7 @@ def clear_vector_db_and_images():
         return f"เกิดข้อผิดพลาดในการล้างข้อมูล: {str(e)}"
 
 
-def query_rag(question: str, n_results: int = 3):
+def query_rag(question: str, n_results: int = 5 , chat_llm: str = "pdf-qwen"):
     """
     ค้นหาในระบบ RAG และสร้างคำตอบแบบ streaming โดยใช้ Ollama
     """
@@ -224,7 +224,8 @@ def query_rag(question: str, n_results: int = 3):
         is_summary=True
         logging.info("####  Summary ####")
         results = collection.query(
-            query_embeddings=[question_embedding.tolist()]       
+            query_embeddings=[question_embedding.tolist()],       
+            n_results=10
         )
     else:
         logging.info("####  RAG ####")
@@ -240,8 +241,8 @@ def query_rag(question: str, n_results: int = 3):
         context_texts.append(doc)
         logging.info(doc)
         logging.info(f"metadata: {metadata}")
-        # Regex pattern สำหรับค้นหา [ภาพ: ชื่อไฟล์.jpeg]
-        pattern = r'\[ภาพ: [^\]]+\.jpeg\]'
+        # Regex pattern สำหรับค้นหา [img: ชื่อไฟล์.jpeg]
+        pattern = r'\[img: [^\]]+\.jpeg\]'
 
         # ค้นหาทุกรูป แบบที่ตรงกับ ส่งเข้ามา
         imgs = re.findall(pattern, doc)
@@ -266,7 +267,7 @@ def query_rag(question: str, n_results: int = 3):
     บริบท:
     {context}
 
-    ให้คำตอบที่ชัดเจนและกระชับเป็นภาษาไทย หากบริบทมีชื่อไฟล์รูปภาพ (เช่น [ภาพ: xxx.png]) ระบุว่ามีรูปภาพที่เกี่ยวข้อง"""
+    ให้คำตอบที่ชัดเจนและกระชับเป็นภาษาไทย หากบริบทมีชื่อไฟล์รูปภาพ ให้แสดงรูปภาพประกอบด้วย """
 
     ## กรณี สรุป ใช้ prompt นี้
     if (is_summary):
@@ -276,16 +277,15 @@ def query_rag(question: str, n_results: int = 3):
 [เนื้อหาจากเอกสารที่ดึงมาเป็นบริบท]  
     {context}
 
-โปรดสรุปข้อมูลนี้ในรูปแบบข้อ ๆ หรือย่อหน้า ให้กระชับ ชัดเจน และครบถ้วน เป็นภาษาไทย"""
+โปรดสรุปข้อมูลนี้ในรูปแบบข้อ ๆ หรือย่อหน้า ให้กระชับ ชัดเจนและครบถ้วน ถ้ามีภาพ ให้แสดงภาพด้วย """
 
 
     logging.info("##############  Augmented prompt #################")
     logging.info(f"promt: {prompt}")
     logging.info("##############  Augmented prompt #################")
     stream = ollama.chat(
-        model=CHAT_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        options={"temperature":0.4 },
+        model=chat_llm,
+        messages=[{"role": "user", "content": prompt}],      
         stream=True
     )
     
@@ -297,15 +297,18 @@ def user(user_message: str, history: List[Dict]) -> Tuple[str, List[Dict]]:
     """
     return "", history + [{"role": "user", "content": user_message}]
 
-def chatbot_interface(history: List[Dict]):
+def chatbot_interface(history: List[Dict], llm_model: str):
     """
     อินเทอร์เฟซแชทบอทแบบ streaming
     """
     user_message = history[-1]["content"]
-    stream, context_texts, image_paths = query_rag(user_message)
+    stream, context_texts, image_paths = query_rag(user_message,n_results=3, chat_llm=llm_model)
 
     history.append({"role": "assistant", "content": ""})
     full_answer=""
+    """
+    ส่วนของการ ตอบคำถาม
+    """
     for chunk in stream:
         content = chunk["message"]["content"]
         full_answer += content 
@@ -313,57 +316,30 @@ def chatbot_interface(history: List[Dict]):
         #logging.info(f"content: {content}")
         yield history
     
-    #if context_texts:
-    #    history[-1]["content"] += "\n\nบริบทที่เกี่ยวข้อง:\n" + "\n".join(context_texts)
-    #    yield history
-    
+
+    """
+    ส่วนของการดึงรูปภาพ ที่เกี่ยวข้องมาแสดง โดยดึงจาก คำตอบด้านบน 
+    """
     if image_paths:
         history[-1]["content"] += "\n\nรูปภาพที่เกี่ยวข้อง:"
         yield history
-        print("//////////////////////////")
-        print(f"full_answer: {full_answer}") 
-        print(f"img_paths : {image_paths}") 
-       
-        print("//////////////////////////")
-        for img_path in image_paths:
-            
-            
-            img_file = image_cleanup(img_path)
-            print("*********************************")
-            logger.info(f"img_path: {img_file}")
-            print("*********************************")
-            for img in img_file:
-                if os.path.exists(img):
-                        image = Image.open(img)
-                        buffered = io.BytesIO()
-                        image.save(buffered, format="PNG")
-                        image_response = f"![Image](data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()})"
 
-                        history.append({"role": "assistant", "content": image_response })
-                        yield history
+        # ใช้ regex เพื่อดึงชื่อไฟล์ที่อยู่ใน [ภาพ: ...] 
+        image_list = re.findall(r'\[?[^\[\]:]*?([\w\-]+\.(?:jpe?g|png))\]?', full_answer, re.IGNORECASE)
+        image_list_uniq = list(dict.fromkeys(image_list))  
+        for img in image_list_uniq:            
+            # ดึงรูปมาแสดง
+            img_path = f"{TEMP_IMG}/{img}"
+            logger.info(f"img_path: {img_path}")      
+            if os.path.exists(img_path):
+                    image = Image.open(img_path)
+                    buffered = io.BytesIO()
+                    image.save(buffered, format="PNG")
+                    image_response = f"#{img} ![{img}](data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()})"
+                    #ส่งรูปไปที่ Chat
+                    history.append({"role": "assistant", "content": image_response })
+                    yield history
 
-def image_cleanup(img_path):
-    #['[ภาพ: 4mnMEfhS.jpeg]']  to ['/data/images/4mnMEfhS.jpeg' ] 
-    print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")
-    print(img_path) 
-    print("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%")   
-   
-    cleaned_img = []
-   
-    for item in img_path:
-        if "ภาพ" in img_path :
-            # แทนที่ '[ภาพ: ' ด้วยสตริงว่าง
-            temp_item = item.replace('[ภาพ: ', '')
-            # ลบ ']' ออกจากท้าย
-            cleaned_item = temp_item.strip(']')
-            cleaned_img.append(f"{TEMP_IMG}/{cleaned_item}")  # add file location 
-        else:
-            cleaned_item = img_path
-            cleaned_img.append(f"{img_path}")  # add file location 
-
-    unique_list = list(set(cleaned_img))  
-    print(unique_list)
-    return unique_list
 
 
 # Gradio interface
@@ -388,9 +364,20 @@ with gr.Blocks() as demo:
         )
     
     with gr.Tab("แชท"):
+        # Choice เลือก Model
+        model_selector = gr.Dropdown(
+            choices=available_models,
+            value="pdf-qwen",
+            label="เลือก LLM Model"
+        )
+        selected_model = gr.State(value="pdf-qwen")  # เก็บไว้ใน state
+        model_selector.change(fn=lambda x: x, inputs=model_selector, outputs=selected_model)
+        # Chat Bot
         chatbot = gr.Chatbot(type="messages")
         msg = gr.Textbox(label="ถามคำถามเกี่ยวกับ PDF")
+        # Clear button 
         clear_chat = gr.Button("ล้าง")
+        # Submit function 
         msg.submit(
             fn=user,
             inputs=[msg, chatbot],
@@ -398,10 +385,12 @@ with gr.Blocks() as demo:
             queue=False
         ).then(
             fn=chatbot_interface,
-            inputs=chatbot,
+            inputs=[chatbot, selected_model],
             outputs=chatbot
         )
         clear_chat.click(lambda: [], None, chatbot, queue=False)
 
 if __name__ == "__main__":
+    # ล้างข้อมูล ออกจากระบบ ก่อน เริ่ม Start Web
+    clear_vector_db_and_images()
     demo.launch()

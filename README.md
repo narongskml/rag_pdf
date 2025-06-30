@@ -28,6 +28,9 @@
     - Chroma สำหรับเก็บข้อมูล
     - Ollama (qwen2.5vl:3b) สำหรับสร้างคำตอบ
 
+## สร้าง Model เพื่อใช้งานก่อน
+    > ollama create pdfworker-th -f Modelfile
+
 ## วิธีการ Run
     > git clone https://github.com/narongskml/rag_pdf.git
     > cd rag_pdf
