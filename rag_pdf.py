@@ -16,11 +16,11 @@ from scipy.spatial.distance import cosine
 import logging
 import re
 
-# CHAT_MODEL ="pdf-deepseek, pdf-qwen,  pdf-llama, pdf-gemma
+# CHAT_MODEL ="pdf-phi3, pdf-qwen,  pdf-llama, pdf-gemma
 # Image folder
 TEMP_IMG="./data/images"
 # รายชื่อ Model ที่คุณมีบน Ollama
-available_models = ["pdf-qwen", "pdf-deepseek", "pdf-llama", "pdf-gemma"]
+available_models = ["pdf-qwen", "pdf-llama", "pdf-gemma","pdf-phi3"]
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -335,7 +335,7 @@ def chatbot_interface(history: List[Dict], llm_model: str):
                     image = Image.open(img_path)
                     buffered = io.BytesIO()
                     image.save(buffered, format="PNG")
-                    image_response = f"#{img} ![{img}](data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()})"
+                    image_response = f"{img} ![{img}](data:image/png;base64,{base64.b64encode(buffered.getvalue()).decode()})"
                     #ส่งรูปไปที่ Chat
                     history.append({"role": "assistant", "content": image_response })
                     yield history
@@ -343,9 +343,13 @@ def chatbot_interface(history: List[Dict], llm_model: str):
 
 
 # Gradio interface
+
 with gr.Blocks() as demo:
-    gr.Markdown("# แชทบอท PDF: RAG")
-    
+    logo="https://camo.githubusercontent.com/9433204b08afdc976c2e4f5a4ba0d81f8877b585cc11206e2969326d25c41657/68747470733a2f2f63646e2e6a7364656c6976722e6e65742f67682f6e61726f6e67736b6d6c2f68746d6c352d6c6561726e406c61746573742f6173736574732f696d67732f546c697665636f64654c6f676f2d3435302e77656270"
+    gr.Markdown(f"""<h3 style='display: flex; align-items: center; gap: 15px; padding: 10px; margin: 0;'>
+        <img alt='T-LIVE-CODE' src='{logo}' style='height: 100px;' >
+        <span style='font-size: 1.5em;'>แชทบอท PDF: RAG</span></h3>""")
+
     with gr.Tab("แอดมิน - อัปโหลด PDF"):
         pdf_input = gr.File(label="อัปโหลดไฟล์ PDF")
         upload_button = gr.Button("ประมวลผล PDF")
