@@ -1,4 +1,4 @@
-FROM phi3:latest
+FROM llama3.2:latest
 
 PARAMETER repeat_penalty 1.05
 PARAMETER temperature 0.4

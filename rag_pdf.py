@@ -22,6 +22,8 @@ TEMP_IMG="./data/images"
 # รายชื่อ Model ที่คุณมีบน Ollama
 available_models = ["pdf-qwen", "pdf-llama", "pdf-gemma","pdf-phi3"]
 
+# จำนวนหน้า เอกสาร
+page_numbers=0
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -46,7 +48,7 @@ def extract_pdf_content(pdf_path: str) -> List[Dict]:
     try:
         doc = fitz.open(pdf_path)
         content_chunks = []
-        
+        page_numbers=doc.page_count
         for page_num in range(len(doc)):
             page = doc[page_num]
             # Extract text
@@ -72,11 +74,11 @@ def extract_pdf_content(pdf_path: str) -> List[Dict]:
                     if image.mode != "RGB":
                         image = image.convert("RGB")
                     
-                    img_id = shortuuid.uuid()[:8]
+                    img_id = f"pic_{str(page_num+1)}_{str(img_index+1)}"
                     img_path = f"{TEMP_IMG}/{img_id}.{image_ext}"
                     image.save(img_path, format=image_ext.upper())
 
-                    img_desc = f"รูปภาพจากหน้า {page_num + 1} ของ PDF, บริบทข้อความ: {text[:100]}..."  
+                    img_desc = f"รูปภาพ จากหน้า {str(page_num+1)} ของ รูปที่ {str(img_index+1)}, บริบทข้อความ: {text[:100]}..."  
                     chunk_data["text"] += f"\n[ภาพ: {img_id}.{image_ext}]"                    
                     chunk_data["images"].append({
                         "data": image,
@@ -84,7 +86,7 @@ def extract_pdf_content(pdf_path: str) -> List[Dict]:
                         "description": img_desc
                     })
                 except Exception as e:
-                    logger.warning(f"ไม่สามารถประมวลผลรูปภาพที่หน้า {page_num + 1}, ดัชนี {img_index}: {str(e)}")
+                    logger.warning(f"ไม่สามารถประมวลผลรูปภาพที่หน้า {str(page_num+1)}, รูปที่ {str(img_index+1)}: {str(e)}")
             
             if chunk_data["text"]:
                 content_chunks.append(chunk_data)
@@ -113,17 +115,6 @@ def embed_image(image: Image.Image) -> np.ndarray:
     inputs = clip_processor(images=image, return_tensors="pt")
     outputs = clip_model.get_image_features(**inputs)
     return outputs.detach().numpy()[0]
-
-def is_image_relevant(image: Image.Image, description: str, threshold: float = 0.7) -> bool:
-    """
-    ตรวจสอบว่ารูปภาพเกี่ยวข้องกับบริบทหรือไม่โดยใช้ CLIP
-    """
-    if not description:
-        return False
-    text_embedding = embed_text(description)
-    image_embedding = embed_image(image)
-    similarity = 1 - cosine(text_embedding, image_embedding)
-    return similarity >= threshold
 
 def store_in_chroma(content_chunks: List[Dict], pdf_name: str):
     """
@@ -219,20 +210,11 @@ def query_rag(question: str, n_results: int = 5 , chat_llm: str = "pdf-qwen"):
     is_summary=False
 
     results=[]
-    # กรณี สรุป ใช้ ใช้ข้อมูล ทั้งหมด เพื่อ สรุป
-    if "สรุป" in question or "summary" in question:        
-        is_summary=True
-        logging.info("####  Summary ####")
-        results = collection.query(
-            query_embeddings=[question_embedding.tolist()],       
-            n_results=10
-        )
-    else:
-        logging.info("####  RAG ####")
-        results = collection.query(
-            query_embeddings=[question_embedding.tolist()],
-            n_results=n_results
-        )
+    # เช็คข้อมูลจาก เอกสาร ตามจำนวนหน้า 
+    results = collection.query(
+        query_embeddings=[question_embedding.tolist()],       
+        n_results=n_results
+    )
     logging.info(f"##### results from vector: { results }")
     context_texts = []
     image_paths = []
@@ -242,10 +224,12 @@ def query_rag(question: str, n_results: int = 5 , chat_llm: str = "pdf-qwen"):
         logging.info(doc)
         logging.info(f"metadata: {metadata}")
         # Regex pattern สำหรับค้นหา [img: ชื่อไฟล์.jpeg]
-        pattern = r'\[img: [^\]]+\.jpeg\]'
+        pattern = r"pic_(\d+)_(\d+)\.jpeg"
 
         # ค้นหาทุกรูป แบบที่ตรงกับ ส่งเข้ามา
         imgs = re.findall(pattern, doc)
+        print("----------IIIII------------") 
+        print(imgs)
         print("---------------------------") 
         if imgs:
             image_paths.append(imgs)
@@ -277,7 +261,7 @@ def query_rag(question: str, n_results: int = 5 , chat_llm: str = "pdf-qwen"):
 [เนื้อหาจากเอกสารที่ดึงมาเป็นบริบท]  
     {context}
 
-โปรดสรุปข้อมูลนี้ในรูปแบบข้อ ๆ หรือย่อหน้า ให้กระชับ ชัดเจนและครบถ้วน ถ้ามีภาพ ให้แสดงภาพด้วย """
+โปรดสรุปข้อมูลนี้ในรูปแบบข้อ ๆ หรือย่อหน้า ให้กระชับ ชัดเจนและครบถ้วน ถ้ามีรูปภาพ ให้แสดงภาพ ด้วย """
 
 
     logging.info("##############  Augmented prompt #################")
@@ -302,7 +286,7 @@ def chatbot_interface(history: List[Dict], llm_model: str):
     อินเทอร์เฟซแชทบอทแบบ streaming
     """
     user_message = history[-1]["content"]
-    stream, context_texts, image_paths = query_rag(user_message,n_results=3, chat_llm=llm_model)
+    stream, context_texts, image_paths = query_rag(user_message,n_results=page_numbers, chat_llm=llm_model)
 
     history.append({"role": "assistant", "content": ""})
     full_answer=""
@@ -325,7 +309,15 @@ def chatbot_interface(history: List[Dict], llm_model: str):
         yield history
 
         # ใช้ regex เพื่อดึงชื่อไฟล์ที่อยู่ใน [ภาพ: ...] 
-        image_list = re.findall(r'\[?[^\[\]:]*?([\w\-]+\.(?:jpe?g|png))\]?', full_answer, re.IGNORECASE)
+        print(full_answer)
+        pattern = r"\[(?:ภาพ:\s*)?(pic_\w+[-_]?\w*\.jpeg)\]"
+
+        # ค้นหาทุกรูป แบบที่ตรงกับ ส่งเข้ามา
+        
+        print("----------PPPP------------")       
+        image_list = re.findall(pattern, full_answer)
+        print(image_list)
+        print("----------xxxx------------")  
         image_list_uniq = list(dict.fromkeys(image_list))  
         for img in image_list_uniq:            
             # ดึงรูปมาแสดง

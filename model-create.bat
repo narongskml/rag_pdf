@@ -11,7 +11,7 @@ ollama rm pdf-qwen
 ollama rm pdf-phi3
 
 REM ===== Create Model =====
-ollama create pdf-llama -f Modelfile-llama3.2
+ollama create pdf-llama -f Modelfile-llama32
 ollama create pdf-gemma -f Modelfile-gemma
 ollama create pdf-qwen -f Modelfile-qwen
 ollama create pdf-phi3 -f Modelfile-phi3
