@@ -14,9 +14,12 @@
     1. ติดตั้ง ollama
     - pull ollama image
       > ollama pull qwen2.5vl:3b
-      > ollama pull gemma3:4b
+      > ollama pull gemma3:1b
+      > ollama pull phi3:latest
+      > ollama pull llama3.2:latest
 
     2. ติดตั้ง python
+   
 
 ## โมเดล ที่ใช้
     - openai/clip-vit-base-patch32  สำหรับทำ text embedding, image embeding
