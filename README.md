@@ -45,3 +45,10 @@
 ## Screen Shot
 ![admin](image.png)
 ![chat](image-1.png)
+
+
+## LICENSE
+    GNU GENERAL PUBLIC LICENSE
+
+## Remark
+    ไม่สามารถใช้งาน จริงบน Production ได้ เฉพาะการเรียนรู้ เพื่อการศึกษาเท่านั้น
