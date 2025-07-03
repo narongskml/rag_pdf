@@ -15,14 +15,14 @@ import shortuuid
 import logging
 import re
 
+
 # CHAT_MODEL ="pdf-phi3, pdf-qwen,  pdf-llama, pdf-gemma
 # Image folder
 TEMP_IMG="./data/images"
+TEMP_VECTOR="./data/chromadb"
 # รายชื่อ Model ที่คุณมีบน Ollama
 available_models = ["pdf-qwen", "pdf-llama", "pdf-gemma","pdf-phi3"]
 
-# จำนวนหน้า เอกสาร
-page_numbers=0
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,14 +31,15 @@ logger = logging.getLogger(__name__)
 clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
 clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-# Chroma client with telemetry disabled
-chroma_client = chromadb.PersistentClient(path="./chroma_db_thai", settings=Settings(anonymized_telemetry=False))
-collection = chroma_client.get_or_create_collection(name="pdf_data_thai")
+
+# Initialize Chroma client 
+# Disable telemetry 
+os.environ["CHROMA_TELEMETRY_ENABLED"] = "false"
+chroma_client = chromadb.PersistentClient(path=TEMP_VECTOR, settings=Settings(anonymized_telemetry=False))
+collection = chroma_client.get_or_create_collection(name="pdf_data")
 
 # Create directory for storing images
-
 os.makedirs(TEMP_IMG, exist_ok=True)
-
 
 def extract_pdf_content(pdf_path: str) -> List[Dict]:
     """
@@ -47,7 +48,7 @@ def extract_pdf_content(pdf_path: str) -> List[Dict]:
     try:
         doc = fitz.open(pdf_path)
         content_chunks = []
-        page_numbers=doc.page_count
+       
         for page_num in range(len(doc)):
             page = doc[page_num]
             # Extract text
@@ -103,6 +104,7 @@ def embed_text(text: str) -> np.ndarray:
     """
     สร้าง embedding สำหรับข้อความโดยใช้ CLIP
     """
+    logging.info("-------------- start embed text -------------------")
     inputs = clip_processor(text=[text], return_tensors="pt", padding=True, truncation=True)
     outputs = clip_model.get_text_features(**inputs)
     return outputs.detach().numpy()[0]
@@ -111,6 +113,7 @@ def embed_image(image: Image.Image) -> np.ndarray:
     """
     สร้าง embedding สำหรับรูปภาพโดยใช้ CLIP
     """
+    logging.info("-------------- start embed image -------------------")
     inputs = clip_processor(images=image, return_tensors="pt")
     outputs = clip_model.get_image_features(**inputs)
     return outputs.detach().numpy()[0]
@@ -173,11 +176,11 @@ def process_pdf_upload(pdf_file):
 
 def clear_vector_db():
     try:
-        chroma_client.clear_system_cache()
+        
        # Clear existing collection to avoid duplicates
-        chroma_client.delete_collection(name="pdf_data_thai")
+        chroma_client.delete_collection(name="pdf_data")
         global collection
-        collection = chroma_client.create_collection(name="pdf_data_thai")
+        collection = chroma_client.create_collection(name="pdf_data")
 
     except Exception as e:
         return f"เกิดข้อผิดพลาดในการล้างข้อมูล: {str(e)}"
@@ -200,19 +203,20 @@ def clear_vector_db_and_images():
         return f"เกิดข้อผิดพลาดในการล้างข้อมูล: {str(e)}"
 
 
-def query_rag(question: str, n_results: int = 5 , chat_llm: str = "pdf-qwen"):
+def query_rag(question: str,  chat_llm: str = "pdf-qwen"):
     """
     ค้นหาในระบบ RAG และสร้างคำตอบแบบ streaming โดยใช้ Ollama
     """
-    logging.info("####  RAG get Question ####")
+    logging.info(f"####  RAG get Question #### ")
     question_embedding = embed_text(question)
     is_summary=False
 
+
     results=[]
-    # เช็คข้อมูลจาก เอกสาร ตามจำนวนหน้า 
+    # เช็คข้อมูลจาก เอกสาร 
     results = collection.query(
         query_embeddings=[question_embedding.tolist()],       
-        n_results=n_results
+        n_results=3
     )
     logging.info(f"##### results from vector: { results }")
     context_texts = []
@@ -272,7 +276,7 @@ def query_rag(question: str, n_results: int = 5 , chat_llm: str = "pdf-qwen"):
         stream=True
     )
     
-    return stream, context_texts, image_paths
+    return stream,  image_paths
 
 def user(user_message: str, history: List[Dict]) -> Tuple[str, List[Dict]]:
     """
@@ -285,7 +289,8 @@ def chatbot_interface(history: List[Dict], llm_model: str):
     อินเทอร์เฟซแชทบอทแบบ streaming
     """
     user_message = history[-1]["content"]
-    stream, context_texts, image_paths = query_rag(user_message,n_results=page_numbers, chat_llm=llm_model)
+    
+    stream,  image_paths = query_rag(user_message, chat_llm=llm_model)
 
     history.append({"role": "assistant", "content": ""})
     full_answer=""
