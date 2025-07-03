@@ -5,5 +5,4 @@ Pillow
 chromadb
 transformers
 ollama
-scipy
 shortuuid

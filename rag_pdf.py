@@ -12,7 +12,6 @@ from transformers import CLIPProcessor, CLIPModel
 import ollama
 from typing import List, Dict, Tuple
 import shortuuid
-from scipy.spatial.distance import cosine
 import logging
 import re
 
