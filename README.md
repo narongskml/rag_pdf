@@ -13,26 +13,37 @@
 ## สิ่งที่ต้องเตรียม
     1. ติดตั้ง ollama
     - pull ollama image
-      > ollama pull qwen2.5vl:3b
+      > ollama pull qwen2.5:1.5b
       > ollama pull gemma3:1b
-      > ollama pull phi3:latest
       > ollama pull llama3.2:latest
 
     2. ติดตั้ง python
+    3. ติดตั้ง git
    
 
 ## โมเดล ที่ใช้
-    - openai/clip-vit-base-patch32  สำหรับทำ text embedding, image embeding
-    - qwen2.5vl:3b  เป็น chat model ที่รองรับ vision
+  # Embedding Model
+    - intfloat/multilingual-e5-base
+  
+  # Text Summarize Model
+    - StelleX/mt5-base-thaisum-text-summarization
+  
+  # Chat Model
+    - qwen2.5:1.5b
+    - gemma3:1b
+    - llama3.2:latest
+  
 
 ## Library ที่ใช้งาน
     - PyMuPDF สำหรับ ประมวลผล PDF
-    - CLIP (openai/clip-vit-base-patch32) สำหรับ embedding รูปภาพ
+    - sentence_transformers สำหรับทำ Text Embeding โมเดลจาก Hugging Face
+    - pythainlp ตัดคำ ภาษาไทย
+    - transformers สำหรับ ดึง Model Text Summary จาก Hugging Face
     - Chroma สำหรับเก็บข้อมูล
     - Ollama (qwen2.5vl:3b) สำหรับสร้างคำตอบ
 
 ## สร้าง Model เพื่อใช้งานก่อน
-    > ollama create pdfworker-th -f Modelfile
+    > model-create.bat
 
 ## วิธีการ Run
     > git clone https://github.com/narongskml/rag_pdf.git
