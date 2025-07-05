@@ -8,39 +8,72 @@ from PIL import Image
 import io
 import chromadb
 from chromadb.config import Settings
-from transformers import CLIPProcessor, CLIPModel
+from sentence_transformers import SentenceTransformer
+from pythainlp.tokenize import word_tokenize
+from transformers import MT5Tokenizer, MT5ForConditionalGeneration
+
+import torch
 import ollama
-from typing import List, Dict, Tuple
 import shortuuid
 import logging
 import re
 
+from typing import List, Dict, Tuple
 
-# CHAT_MODEL ="pdf-phi3, pdf-qwen,  pdf-llama, pdf-gemma
 # Image folder
 TEMP_IMG="./data/images"
 TEMP_VECTOR="./data/chromadb"
 # รายชื่อ Model ที่คุณมีบน Ollama
-available_models = ["pdf-qwen", "pdf-llama", "pdf-gemma","pdf-phi3"]
+AVAILABLE_MODELS = ["pdf-gemma", "pdf-qwen","pdf-llama"]
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize models for embeding
-clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
-clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
-
-# Initialize Chroma client 
-# Disable telemetry 
+# Initialize Chroma client Disable telemetry 
 os.environ["CHROMA_TELEMETRY_ENABLED"] = "false"
 chroma_client = chromadb.PersistentClient(path=TEMP_VECTOR, settings=Settings(anonymized_telemetry=False))
 collection = chroma_client.get_or_create_collection(name="pdf_data")
 
+# ตั้งค่า device
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+logging.info(f"Using device: {device}")
+
+# โหลดโมเดล embedding
+# SentenceTransformer สำหรับข้อความหลายภาษา (เน้นภาษาไทย)
+sentence_model = SentenceTransformer('intfloat/multilingual-e5-base', device=device)
+
 # Create directory for storing images
 os.makedirs(TEMP_IMG, exist_ok=True)
 
+sum_tokenizer = MT5Tokenizer.from_pretrained('StelleX/mt5-base-thaisum-text-summarization')
+sum_model = MT5ForConditionalGeneration.from_pretrained('StelleX/mt5-base-thaisum-text-summarization')
+
+def summarize_content(content: str) -> str:
+    """
+        สรุปเนื้อหา 
+    """
+    logging.info("%%%%%%%%%%%%%% SUMMARY %%%%%%%%%%%%%%%%%%%%%")    
+       
+    input_ = sum_tokenizer(content, truncation=True, max_length=1024, return_tensors="pt")
+    with torch.no_grad():
+        preds = sum_model.generate(
+            input_['input_ids'].to('cpu'),
+            num_beams=15,
+            num_return_sequences=1,
+            no_repeat_ngram_size=1,
+            remove_invalid_values=True,
+            max_length=250
+        )
+
+    summary = sum_tokenizer.decode(preds[0], skip_special_tokens=True)
+
+    logging.info(f" summary: {summary}.")
+    logging.info("%%%%%%%%%%%%%% SUMMARY %%%%%%%%%%%%%%%%%%%%%")
+    return summary
+
+# แยกเนื้อหา, รูป ออกจาก PDF
 def extract_pdf_content(pdf_path: str) -> List[Dict]:
     """
     แยกข้อความและรูปภาพจาก PDF โดยใช้ PyMuPDF
@@ -48,16 +81,18 @@ def extract_pdf_content(pdf_path: str) -> List[Dict]:
     try:
         doc = fitz.open(pdf_path)
         content_chunks = []
-       
+        all_text=[]
+
         for page_num in range(len(doc)):
             page = doc[page_num]
             # Extract text
             text = page.get_text("text").strip()
+            all_text.append(f"{text} \n\n\n")
             if not text:
                 text = f"ไม่มีข้อความในหน้า {page_num + 1}"
             
             logging.info("################# Text data ##################")
-            chunk_data = {"text": text, "images": []}
+            chunk_data = {"text": f"ข้อมูลจากหน้า {page_num + 1} : {text}" , "images": []}
             
             # Extract images
             image_list = page.get_images(full=True)
@@ -78,7 +113,7 @@ def extract_pdf_content(pdf_path: str) -> List[Dict]:
                     img_path = f"{TEMP_IMG}/{img_id}.{image_ext}"
                     image.save(img_path, format=image_ext.upper())
 
-                    img_desc = f"รูปภาพ จากหน้า {str(page_num+1)} ของ รูปที่ {str(img_index+1)}, บริบทข้อความ: {text[:100]}..."  
+                    img_desc = f"รูปภาพ จากหน้า {str(page_num+1)} ของ รูปที่ {str(img_index+1)}, บริบทข้อความ: {text[:80]}..."  
                     chunk_data["text"] += f"\n[ภาพ: {img_id}.{image_ext}]"                    
                     chunk_data["images"].append({
                         "data": image,
@@ -95,28 +130,52 @@ def extract_pdf_content(pdf_path: str) -> List[Dict]:
             logger.warning("ไม่พบรูปภาพใน PDF: %s", pdf_path)
         
         doc.close()
+        content_text= "".join(all_text)
+        # ตัดคำภาษาไทย
+        thaitoken_text = preprocess_thai_text(content_text) if any(ord(c) >= 0x0E00 and ord(c) <= 0x0E7F for c in text) else text
+        print("################################")
+        print(f"{ thaitoken_text }")
+        print("################################")
+        global summarize
+        summarize = summarize_content(thaitoken_text)
         return content_chunks
     except Exception as e:
         logger.error("เกิดข้อผิดพลาดในการแยก PDF: %s", str(e))
         raise
 
+# ตัดคำภาษาไทย 
+def preprocess_thai_text(text: str) -> str:
+    """
+    ตัดคำภาษาไทยด้วย pythainlp เพื่อเตรียมข้อความ
+
+    Args:
+        text (str): ข้อความภาษาไทย
+
+    Returns:
+        str: ข้อความที่ตัดคำแล้ว
+    """
+    return " ".join(word_tokenize(text, engine="newmm"))
+
+
 def embed_text(text: str) -> np.ndarray:
     """
-    สร้าง embedding สำหรับข้อความโดยใช้ CLIP
-    """
-    logging.info("-------------- start embed text -------------------")
-    inputs = clip_processor(text=[text], return_tensors="pt", padding=True, truncation=True)
-    outputs = clip_model.get_text_features(**inputs)
-    return outputs.detach().numpy()[0]
+    สร้าง embedding สำหรับข้อความโดยใช้ SentenceTransformer 
 
-def embed_image(image: Image.Image) -> np.ndarray:
+    Args:
+        text (str): ข้อความที่ต้องการสร้าง embedding        
+
+    Returns:
+        np.ndarray: Embedding vector ที่รวมจากหลายโมเดล
     """
-    สร้าง embedding สำหรับรูปภาพโดยใช้ CLIP
-    """
-    logging.info("-------------- start embed image -------------------")
-    inputs = clip_processor(images=image, return_tensors="pt")
-    outputs = clip_model.get_image_features(**inputs)
-    return outputs.detach().numpy()[0]
+    logging.info("-------------- start embed text  -------------------")
+    
+    # ตัดคำภาษาไทย
+    processed_text = preprocess_thai_text(text) if any(ord(c) >= 0x0E00 and ord(c) <= 0x0E7F for c in text) else text
+    
+    # สร้าง embedding ด้วย SentenceTransformer
+    sentence_embedding = sentence_model.encode(processed_text, normalize_embeddings=True, device=device)    
+        
+    return sentence_embedding
 
 def store_in_chroma(content_chunks: List[Dict], pdf_name: str):
     """
@@ -209,19 +268,27 @@ def query_rag(question: str,  chat_llm: str = "pdf-qwen"):
     """
     logging.info(f"####  RAG get Question #### ")
     question_embedding = embed_text(question)
-    is_summary=False
-
-
+    
     results=[]
-    # เช็คข้อมูลจาก เอกสาร 
+    # เช็คข้อมูลจาก เอกสาร ดึงมา 3 รายการ   ##  Retrival
+    max_result = 3
+    if "กี่" in question:
+        max_result = 5
+    
+    if "ทั้งหมด" in question:
+        max_result = 10
+
+    if "บ้าง" in question:
+        max_result = 5
+
     results = collection.query(
         query_embeddings=[question_embedding.tolist()],       
-        n_results=3
+        n_results=max_result
     )
     logging.info(f"##### results from vector: { results }")
     context_texts = []
     image_paths = []
-    
+
     for doc, metadata in zip(results["documents"][0], results["metadatas"][0]):
         context_texts.append(doc)
         logging.info(doc)
@@ -233,7 +300,7 @@ def query_rag(question: str,  chat_llm: str = "pdf-qwen"):
         imgs = re.findall(pattern, doc)
         print("----------IIIII------------") 
         print(imgs)
-        print("---------------------------") 
+        print("----------IIIII------------") 
         if imgs:
             image_paths.append(imgs)
             logging.info(f"img: {imgs}")
@@ -243,40 +310,33 @@ def query_rag(question: str,  chat_llm: str = "pdf-qwen"):
             if metadata["type"] == "image":
                 logging.info(f"image_path : { metadata["image_path"]}")
                 image_paths.append(metadata['image_path'])
-
-        #    image_paths.append(metadata["image_path"])
     
 
-    context = "\n".join(context_texts)
 
+    context = "\n".join(context_texts)
+    ##  Augmented
+    logging.info("############## Begin Augmented prompt #################")
     prompt = f"""จากบริบทต่อไปนี้ ตอบคำถาม: {question}
 
-    บริบท:
-    {context}
+    บริบท: 
+        {summarize}
 
-    ให้คำตอบที่ชัดเจนและกระชับเป็นภาษาไทย หากบริบทมีชื่อไฟล์รูปภาพ ให้แสดงรูปภาพประกอบด้วย """
+        {context}
 
-    ## กรณี สรุป ใช้ prompt นี้
-    if (is_summary):
-        prompt=f"""คุณคือผู้ช่วยในการสรุปข้อมูลจากเอกสาร โดยเน้นให้เข้าใจง่าย ใช้ภาษาที่ชัดเจน เหมาะกับผู้อ่านทั่วไป  
-กรุณาสรุปข้อมูลด้านล่างให้เป็นภาษาธรรมดา ไม่ใช้ศัพท์เฉพาะมากเกินไป และจัดลำดับความสำคัญให้ผู้อ่านเข้าใจภาพรวม
-
-[เนื้อหาจากเอกสารที่ดึงมาเป็นบริบท]  
-    {context}
-
-โปรดสรุปข้อมูลนี้ในรูปแบบข้อ ๆ หรือย่อหน้า ให้กระชับ ชัดเจนและครบถ้วน ถ้ามีรูปภาพ ให้แสดงภาพ ด้วย """
-
-
-    logging.info("##############  Augmented prompt #################")
+    ให้คำตอบที่ชัดเจนและกระชับเป็นภาษาไทย หากบริบทมีชื่อไฟล์รูปภาพ ให้แสดงรูปภาพประกอบด้วย """ 
+    
     logging.info(f"promt: {prompt}")
-    logging.info("##############  Augmented prompt #################")
+    logging.info("##############  End Augmented prompt #################")
+
+    logging.info("+++++++++++++  Send prompt To LLM  ++++++++++++++++++")
+    ## Generation  เพื่อการตอบ chat
     stream = ollama.chat(
         model=chat_llm,
         messages=[{"role": "user", "content": prompt}],      
         stream=True
     )
     
-    return stream,  image_paths
+    return stream
 
 def user(user_message: str, history: List[Dict]) -> Tuple[str, List[Dict]]:
     """
@@ -290,7 +350,7 @@ def chatbot_interface(history: List[Dict], llm_model: str):
     """
     user_message = history[-1]["content"]
     
-    stream,  image_paths = query_rag(user_message, chat_llm=llm_model)
+    stream= query_rag(user_message, chat_llm=llm_model)
 
     history.append({"role": "assistant", "content": ""})
     full_answer=""
@@ -308,23 +368,26 @@ def chatbot_interface(history: List[Dict], llm_model: str):
     """
     ส่วนของการดึงรูปภาพ ที่เกี่ยวข้องมาแสดง โดยดึงจาก คำตอบด้านบน 
     """
-    if image_paths:
+
+    # ใช้ regex เพื่อดึงชื่อไฟล์ที่อยู่ใน [ภาพ: ...] 
+    print(full_answer)
+    pattern1 = r"\[(?:ภาพ:\s*)?(pic_\w+[-_]?\w*\.jpeg)\]"
+    pattern2 = r"(pic_\w+[-_]?\w*\.jpeg)"
+    # ค้นหาทุกรูป แบบที่ตรงกับ ส่งเข้ามา
+    
+    print("----------PPPP------------")       
+    image_list = re.findall(pattern1, full_answer)
+    print(image_list)
+    if (len(image_list)==0):
+        image_list = re.findall(pattern2, full_answer)
+    print("----------xxxx------------")  
+    # ดึงเฉพาะรูปที่ไม่ซ้ำกัน
+    image_list_uniq = list(dict.fromkeys(image_list))  
+    if image_list_uniq:
         history[-1]["content"] += "\n\nรูปภาพที่เกี่ยวข้อง:"
-        yield history
-
-        # ใช้ regex เพื่อดึงชื่อไฟล์ที่อยู่ใน [ภาพ: ...] 
-        print(full_answer)
-        pattern = r"\[(?:ภาพ:\s*)?(pic_\w+[-_]?\w*\.jpeg)\]"
-
-        # ค้นหาทุกรูป แบบที่ตรงกับ ส่งเข้ามา
-        
-        print("----------PPPP------------")       
-        image_list = re.findall(pattern, full_answer)
-        print(image_list)
-        print("----------xxxx------------")  
-        image_list_uniq = list(dict.fromkeys(image_list))  
-        for img in image_list_uniq:            
-            # ดึงรูปมาแสดง
+        yield history    
+        # ดึงรูปมาแสดง 
+        for img in image_list_uniq:
             img_path = f"{TEMP_IMG}/{img}"
             logger.info(f"img_path: {img_path}")      
             if os.path.exists(img_path):
@@ -366,11 +429,11 @@ with gr.Blocks() as demo:
     with gr.Tab("แชท"):
         # Choice เลือก Model
         model_selector = gr.Dropdown(
-            choices=available_models,
-            value="pdf-qwen",
+            choices=AVAILABLE_MODELS,
+            value="pdf-gemma",
             label="เลือก LLM Model"
         )
-        selected_model = gr.State(value="pdf-qwen")  # เก็บไว้ใน state
+        selected_model = gr.State(value="pdf-gemma")  # เก็บไว้ใน state
         model_selector.change(fn=lambda x: x, inputs=model_selector, outputs=selected_model)
         # Chat Bot
         chatbot = gr.Chatbot(type="messages")

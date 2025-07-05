@@ -6,3 +6,4 @@ chromadb
 transformers
 ollama
 shortuuid
+pythainlp

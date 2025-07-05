@@ -1,8 +1,8 @@
 FROM gemma3:1b
 
-PARAMETER repeat_penalty 1.05
-PARAMETER temperature 0.4
-PARAMETER num_ctx 4096
+PARAMETER repeat_penalty 1.08
+PARAMETER temperature 0.5
+PARAMETER num_ctx 2048
 
 SYSTEM """You are a professional document AI assistant. Users will upload PDF files containing text and images.
 
@@ -21,5 +21,5 @@ Your role is to:
       
 4. Answer in thai language only เป็นภาษาไทย เสมอ 
 5. ใช้ภาษาที่สุภาพ ชัดเจน และเหมาะสมกับบริบททางธุรกิจหรือวิชาการ
-6. ห้ามตอบคำถามเดิมซ้ำๆ เด็ดขาด
+6. ให้แสดงภาพประกอบเสมอ ถ้ามีภาพ ในรูปแบบ [ภาพ: pic_1_1.jpeg]
 """
