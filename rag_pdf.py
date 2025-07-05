@@ -371,8 +371,8 @@ def chatbot_interface(history: List[Dict], llm_model: str):
 
     # ใช้ regex เพื่อดึงชื่อไฟล์ที่อยู่ใน [ภาพ: ...] 
     print(full_answer)
-    pattern1 = r"\[(?:ภาพ:\s*)?(pic_\w+[-_]?\w*\.jpeg)\]"
-    pattern2 = r"(pic_\w+[-_]?\w*\.jpeg)"
+    pattern1 = r"\[(?:ภาพ:\s*)?(pic_\w+[-_]?\w*\.(?:jpe?g|png))\]"
+    pattern2 = r"(pic_\w+[-_]?\w*\.(?:jpe?g|png))"
     # ค้นหาทุกรูป แบบที่ตรงกับ ส่งเข้ามา
     
     print("----------PPPP------------")       
